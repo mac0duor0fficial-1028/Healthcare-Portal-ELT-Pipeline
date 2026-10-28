@@ -1,0 +1,36 @@
+# Committed on purpose: contains only env-var lookups, never secrets.
+# Run dbt from this folder (or pass --profiles-dir dbt_project).
+telehealth:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_DBT_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_DBT_PRIVATE_KEY_PATH') }}"
+      # add private_key_passphrase: "{{ env_var('SNOWFLAKE_DBT_PRIVATE_KEY_PASSPHRASE') }}" if encrypted
+      role: TRANSFORMER
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'WH_ELT') }}"
+      database: TELEHEALTH_ANALYTICS
+      schema: "dbt_{{ env_var('DBT_USER', 'dev') }}"
+      threads: 4
+    ci:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_DBT_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_DBT_PRIVATE_KEY_PATH') }}"
+      role: TRANSFORMER
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'WH_ELT') }}"
+      database: TELEHEALTH_ANALYTICS
+      schema: "{{ env_var('DBT_CI_SCHEMA', 'ci_local') }}"
+      threads: 4
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_DBT_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_DBT_PRIVATE_KEY_PATH') }}"
+      role: TRANSFORMER
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'WH_ELT') }}"
+      database: TELEHEALTH_ANALYTICS
+      schema: analytics
+      threads: 4

@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_roles
+    columns:
+      - name: role_id
+        data_tests: [unique, not_null]
+  - name: stg_users
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+  - name: stg_locations
+    columns:
+      - name: location_id
+        data_tests: [unique, not_null]
+  - name: stg_diseases
+    columns:
+      - name: disease_id
+        data_tests: [unique, not_null]
+  - name: stg_visiting_hours_schedules
+    columns:
+      - name: schedule_id
+        data_tests: [unique, not_null]
+  - name: stg_patients
+    columns:
+      - name: patient_id
+        data_tests: [unique, not_null]
+  - name: stg_appointments
+    description: One row per appointment, latest RAW snapshot, typed and UTC-normalised.
+    columns:
+      - name: appointment_id
+        data_tests: [unique, not_null]
+      - name: patient_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_patients')
+                field: patient_id
+              config: {severity: warn}
+      - name: doctor_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
+              config: {severity: warn}
+      - name: appointment_date
+        data_tests: [not_null]
+      - name: start_time
+        data_tests:
+          - not_null:
+              config: {severity: warn}
+      - name: end_time
+        data_tests:
+          - not_null:
+              config: {severity: warn}
+      - name: status
+        data_tests: [not_null]

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read   # to download the production manifest artifact
+
+env:
+  DBT_PROFILES_DIR: dbt_project
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_DBT_USER: ${{ secrets.SNOWFLAKE_DBT_USER }}
+  SNOWFLAKE_DBT_PRIVATE_KEY_PATH: ${{ github.workspace }}/dbt_key.p8
+  DBT_CI_SCHEMA: ci_pr_${{ github.event.pull_request.number }}
+
+jobs:
+  python:
+    name: Python lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+
+  dbt:
+    name: dbt build (slim CI)
+    runs-on: ubuntu-latest
+    # Secrets are not exposed to PRs from forks; this job only runs for same-repo PRs.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Write Snowflake key
+        env:
+          KEY_MATERIAL: ${{ secrets.SNOWFLAKE_DBT_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$KEY_MATERIAL" > "$SNOWFLAKE_DBT_PRIVATE_KEY_PATH"
+
+      - name: Install dbt packages
+        working-directory: dbt_project
+        run: dbt deps
+
+      # Non-blocking until `sqlfluff fix` has been run once locally; then remove continue-on-error.
+      - name: Lint SQL
+        continue-on-error: true
+        run: sqlfluff lint dbt_project/models dbt_project/tests --format github-annotation-native
+
+      - name: Fetch production manifest (for state comparison)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dbt_project/prod-artifacts
+          gh run download --name dbt-manifest --dir dbt_project/prod-artifacts \
+            || echo "No production manifest yet - falling back to a full build"
+
+      - name: dbt build (only changed models + downstream)
+        working-directory: dbt_project
+        run: |
+          if [ -f prod-artifacts/manifest.json ]; then
+            dbt build --target ci --select "state:modified+" --defer --state prod-artifacts
+          else
+            dbt build --target ci
+          fi
+
+      - name: Drop PR schema
+        if: always()
+        working-directory: dbt_project
+        run: dbt run-operation drop_ci_schema --target ci

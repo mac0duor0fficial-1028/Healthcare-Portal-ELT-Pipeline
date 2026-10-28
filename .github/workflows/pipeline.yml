@@ -1,0 +1,84 @@
+name: Daily pipeline (EL -> dbt)
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 04:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: prod-warehouse
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DBT_PROFILES_DIR: dbt_project
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_LOADER_USER: ${{ secrets.SNOWFLAKE_LOADER_USER }}
+  SNOWFLAKE_LOADER_PRIVATE_KEY_PATH: ${{ github.workspace }}/loader_key.p8
+  SNOWFLAKE_DBT_USER: ${{ secrets.SNOWFLAKE_DBT_USER }}
+  SNOWFLAKE_DBT_PRIVATE_KEY_PATH: ${{ github.workspace }}/dbt_key.p8
+
+jobs:
+  extract-load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Write loader key
+        env:
+          KEY_MATERIAL: ${{ secrets.SNOWFLAKE_LOADER_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$KEY_MATERIAL" > "$SNOWFLAKE_LOADER_PRIVATE_KEY_PATH"
+      - run: python -m extract_load.extract
+
+  transform:
+    needs: extract-load
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Write dbt key
+        env:
+          KEY_MATERIAL: ${{ secrets.SNOWFLAKE_DBT_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$KEY_MATERIAL" > "$SNOWFLAKE_DBT_PRIVATE_KEY_PATH"
+      - working-directory: dbt_project
+        run: dbt deps
+      - name: Source freshness
+        working-directory: dbt_project
+        run: dbt source freshness --target prod
+      - name: Verify field mapping still matches the API
+        working-directory: dbt_project
+        run: dbt run-operation assert_field_coverage --target prod
+      - name: Build (models + tests)
+        working-directory: dbt_project
+        run: dbt build --target prod
+
+  notify-failure:
+    needs: [extract-load, transform]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack alert (optional)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -sS -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"Telehealth pipeline failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "$SLACK_WEBHOOK_URL"
+          else
+            echo "SLACK_WEBHOOK_URL not set; skipping alert"
+          fi

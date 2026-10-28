@@ -1,10 +1,19 @@
-# Python-generated files
+# secrets
+.env
+*.p8
+*.pem
+*.key
+# python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
+.venv/
+.pytest_cache/
+.ruff_cache/
+# dbt
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+dbt_project/prod-artifacts/
+# local data
+data/snapshots/*
+!data/snapshots/.gitkeep
+dbt_project/.user.yml

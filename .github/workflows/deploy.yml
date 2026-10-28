@@ -1,0 +1,71 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+    paths: ["dbt_project/**", "requirements.txt", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: prod-warehouse
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DBT_PROFILES_DIR: dbt_project
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_DBT_USER: ${{ secrets.SNOWFLAKE_DBT_USER }}
+  SNOWFLAKE_DBT_PRIVATE_KEY_PATH: ${{ github.workspace }}/dbt_key.p8
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Write Snowflake key
+        env:
+          KEY_MATERIAL: ${{ secrets.SNOWFLAKE_DBT_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$KEY_MATERIAL" > "$SNOWFLAKE_DBT_PRIVATE_KEY_PATH"
+      - working-directory: dbt_project
+        run: dbt deps
+      - name: Build production
+        working-directory: dbt_project
+        run: dbt build --target prod
+      - name: Generate docs
+        working-directory: dbt_project
+        run: dbt docs generate --target prod
+      - name: Save manifest for slim CI
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-manifest
+          path: dbt_project/target/manifest.json
+          retention-days: 90
+      - name: Package docs site
+        run: |
+          mkdir -p site
+          cp dbt_project/target/{index.html,manifest.json,catalog.json} site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

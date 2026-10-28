@@ -1,0 +1,107 @@
+name: telehealth
+version: "1.0.0"
+config-version: 2
+profile: telehealth
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+models:
+  telehealth:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+
+data_tests:
+  +store_failures: true
+  +schema: test_failures
+
+vars:
+  # ---- business rules ---------------------------------------------------
+  doctor_role_names: ["doctor"]          # [] = treat every user as a doctor
+  completed_statuses: ["completed", "done", "closed", "consulted", "visited"]
+  cancelled_statuses: ["cancelled", "canceled"]
+  no_show_statuses: ["no show", "no_show", "noshow", "missed", "absent"]
+  open_statuses: ["scheduled", "booked", "pending", "confirmed", "arrived", "waiting",
+                  "in progress", "in_progress", "late", "late arrival"]
+  # Only if the API has no end time: end = start + N minutes (flagged is_end_time_derived)
+  default_slot_minutes: null
+  # Only if the API has no actual consultation start: wait = scheduled start - arrival
+  wait_time_fallback_to_scheduled_start: false
+  date_spine_start: "2020-01-01"
+
+  # ---- source field mapping --------------------------------------------
+  # Canonical column -> candidate JSON keys (case-insensitive, first non-null wins).
+  # roles/* keys are taken from the provider's published sample; everything else is
+  # a best-effort guess. RUN `make profile` AND ADJUST BEFORE THE FIRST dbt build.
+  field_map:
+    roles:
+      role_id:    {candidates: [id, roleId], type: int, required: true}
+      role_name:  {candidates: [roleName, name], type: string, required: true}
+      is_active:  {candidates: [isActive], type: boolean}
+      created_at: {candidates: [createdOn, createdAt], type: timestamp}
+    users:
+      user_id:        {candidates: [userId, id], type: int, required: true}
+      user_name:      {candidates: [userName, fullName, name, doctorName], type: string}
+      role_id:        {candidates: [roleId], type: int}
+      role_name:      {candidates: [roleName, role], type: string}
+      specialization: {candidates: [specialization, speciality, specialty, department], type: string}
+      location_id:    {candidates: [locationId, clinicId], type: int}
+      is_active:      {candidates: [isActive, active], type: boolean}
+      created_at:     {candidates: [createdOn, createdAt], type: timestamp}
+    locations:
+      location_id:   {candidates: [locationId, id], type: int, required: true}
+      location_name: {candidates: [locationName, clinicName, name], type: string}
+      city:          {candidates: [city], type: string}
+      address:       {candidates: [address, addressLine1], type: string}
+      is_active:     {candidates: [isActive, active], type: boolean}
+    diseases:
+      disease_id:   {candidates: [diseaseId, id], type: int, required: true}
+      disease_name: {candidates: [diseaseName, name], type: string}
+      is_active:    {candidates: [isActive, active], type: boolean}
+    visiting_hours_schedules:
+      schedule_id:  {candidates: [scheduleId, visitingHoursScheduleId, id], type: int, required: true}
+      doctor_id:    {candidates: [doctorId, userId], type: int}
+      location_id:  {candidates: [locationId, clinicId], type: int}
+      day_of_week:  {candidates: [dayOfWeek, weekDay, day], type: string}
+      start_clock:  {candidates: [startTime, fromTime, openTime], type: string}
+      end_clock:    {candidates: [endTime, toTime, closeTime], type: string}
+      slot_minutes: {candidates: [slotDuration, slotMinutes, slotDurationMinutes, avgConsultationTime], type: int}
+      is_active:    {candidates: [isActive, active], type: boolean}
+    patients:
+      patient_id:    {candidates: [patientId, id], type: int, required: true}
+      patient_name:  {candidates: [patientName, fullName, name], type: string}
+      mobile_no:     {candidates: [mobileNo, mobile, phoneNo, phone, phoneNumber], type: string}
+      gender:        {candidates: [gender, sex], type: string}
+      date_of_birth: {candidates: [dateOfBirth, dob, birthDate], type: date}
+      age:           {candidates: [age], type: int}
+      created_at:    {candidates: [createdOn, createdAt, registeredOn], type: timestamp}
+    appointments:
+      appointment_id:          {candidates: [appointmentId, id], type: int, required: true}
+      patient_id:              {candidates: [patientId], type: int, required: true}
+      doctor_id:               {candidates: [doctorId, userId, providerId], type: int, required: true}
+      location_id:             {candidates: [locationId, clinicId], type: int}
+      disease_id:              {candidates: [diseaseId], type: int}
+      schedule_id:             {candidates: [scheduleId, visitingHoursScheduleId, visitingHoursId], type: int}
+      appointment_date:        {candidates: [appointmentDate, visitDate, date], type: date, required: true}
+      start_ts:                {candidates: [startDateTime, appointmentStartTime, startTime, fromTime], type: timestamp}
+      end_ts:                  {candidates: [endDateTime, appointmentEndTime, endTime, toTime], type: timestamp}
+      start_clock:             {candidates: [startTime, fromTime, slotStart, appointmentTime, timeSlot], type: string}
+      end_clock:               {candidates: [endTime, toTime, slotEnd], type: string}
+      status:                  {candidates: [appointmentStatus, status], type: string, required: true}
+      arrived_at:              {candidates: [arrivedAt, arrivedTime, arrivalTime, arrivedOn, checkInTime], type: timestamp}
+      consultation_started_at: {candidates: [consultationStartTime, consultationStartedAt, consultationStart, inTime], type: timestamp}
+      consultation_ended_at:   {candidates: [consultationEndTime, consultationEndedAt, completedAt, outTime], type: timestamp}
+      token_no:                {candidates: [tokenNo, tokenNumber, token], type: int}
+      is_late_arrival:         {candidates: [isLateArrival, lateArrival], type: boolean}
+      created_at:              {candidates: [createdOn, createdAt, bookedOn, bookingDate], type: timestamp}
